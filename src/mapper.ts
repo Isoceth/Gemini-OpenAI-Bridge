@@ -17,21 +17,39 @@ async function callLocalFunction(_name: string, _args: unknown) {
 /* ================================================================== */
 /* Request mapper: OpenAI ➞ Gemini                                     */
 /* ================================================================== */
-export async function mapRequest(body: any) {
-  const parts: Part[] = [];
 
-  /* ---- convert messages & vision --------------------------------- */
-  for (const m of body.messages) {
-    if (Array.isArray(m.content)) {
-      for (const item of m.content) {
-        if (item.type === 'image_url') {
-          parts.push({ inlineData: await fetchAndEncode(item.image_url.url) });
-        } else if (item.type === 'text') {
-          parts.push({ text: item.text });
-        }
+// Convert a single message's content to Gemini parts
+async function contentToParts(content: any): Promise<Part[]> {
+  const parts: Part[] = [];
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      if (item.type === 'image_url') {
+        parts.push({ inlineData: await fetchAndEncode(item.image_url.url) });
+      } else if (item.type === 'text') {
+        parts.push({ text: item.text });
       }
+    }
+  } else if (typeof content === 'string') {
+    parts.push({ text: content });
+  }
+  return parts;
+}
+
+export async function mapRequest(body: any) {
+  // Separate system messages from conversation messages
+  let systemInstruction: string | undefined;
+  const contents: Array<{ role: string; parts: Part[] }> = [];
+
+  for (const m of body.messages) {
+    if (m.role === 'system') {
+      // Combine system messages into a single instruction
+      const text = typeof m.content === 'string' ? m.content : m.content?.text ?? '';
+      systemInstruction = systemInstruction ? `${systemInstruction}\n\n${text}` : text;
     } else {
-      parts.push({ text: m.content });
+      // Map OpenAI roles to Gemini roles (user stays user, assistant becomes model)
+      const geminiRole = m.role === 'assistant' ? 'model' : 'user';
+      const parts = await contentToParts(m.content);
+      contents.push({ role: geminiRole, parts });
     }
   }
 
@@ -55,9 +73,10 @@ export async function mapRequest(body: any) {
   generationConfig.maxInputTokens ??= 1_000_000; // lift context cap
 
   const geminiReq = {
-    contents: [{ role: 'user', parts }],
+    contents,
     generationConfig,
     stream: body.stream,
+    systemInstruction,
   };
 
   console.log('Gemini request:', geminiReq);
@@ -115,9 +134,10 @@ export function mapResponse(gResp: any) {
       },
     ],
     usage: {
-      prompt_tokens: usage.promptTokens ?? 0,
-      completion_tokens: usage.candidatesTokens ?? 0,
-      total_tokens: usage.totalTokens ?? 0,
+      // Gemini uses *TokenCount naming convention
+      prompt_tokens: usage.promptTokenCount ?? usage.promptTokens ?? 0,
+      completion_tokens: usage.candidatesTokenCount ?? usage.candidatesTokens ?? 0,
+      total_tokens: usage.totalTokenCount ?? usage.totalTokens ?? 0,
     },
   };
 }
