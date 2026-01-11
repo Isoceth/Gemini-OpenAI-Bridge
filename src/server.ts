@@ -1,6 +1,6 @@
 import http from 'http';
 import { sendChat, sendChatStream, listModels } from './chatwrapper';
-import { mapRequest, mapResponse, mapStreamChunk } from './mapper';
+import { mapRequest, mapResponse, createStreamMapper } from './mapper';
 import { validateChatRequest, createError } from './validation';
 import type { OpenAIChatRequest, OpenAIErrorResponse } from './types';
 
@@ -109,8 +109,12 @@ http
 
           console.log('➜ sending HTTP 200 streamed response');
 
+          // Use stateful mapper to track think tag state across chunks
+          const mapChunk = createStreamMapper();
+
           for await (const chunk of sendChatStream({ ...geminiReq, tools })) {
-            res.write(`data: ${JSON.stringify(mapStreamChunk(chunk))}\n\n`);
+            const mapped = mapChunk(chunk);
+            res.write(`data: ${JSON.stringify(mapped)}\n\n`);
           }
           res.end('data: [DONE]\n\n');
 

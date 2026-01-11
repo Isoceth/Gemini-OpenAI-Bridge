@@ -181,6 +181,82 @@ export function mapResponse(
 /* Stream chunk mapper: Gemini ➞ OpenAI                                */
 /* ================================================================== */
 
+/**
+ * Creates a stateful stream chunk mapper that tracks thinking state
+ * to properly open/close think tags across chunks.
+ */
+export function createStreamMapper() {
+  let wasThinking = false;
+
+  return function mapChunk(chunk: GeminiStreamChunk): OpenAIStreamChunk {
+    const candidate = chunk?.candidates?.[0];
+    const parts = candidate?.content?.parts ?? [];
+    const usage = chunk?.usageMetadata;
+
+    // Combine all text parts from this chunk
+    let content = '';
+    let isThinking = false;
+
+    for (const part of parts) {
+      if (part.thought === true) {
+        isThinking = true;
+        // Opening think tag if we weren't thinking before
+        if (!wasThinking) {
+          content += '<think>';
+        }
+        content += part.text ?? '';
+      } else if (typeof part.text === 'string') {
+        // Close think tag if we were thinking but this part isn't
+        if (wasThinking && !isThinking) {
+          content += '</think>';
+        }
+        content += part.text;
+      }
+    }
+
+    // Update state for next chunk
+    wasThinking = isThinking;
+
+    const result: OpenAIStreamChunk = {
+      choices: [{
+        delta: {
+          role: 'assistant',
+          content: content || undefined,
+        },
+        index: 0,
+        finish_reason: null,
+      }],
+    };
+
+    // Include usage metadata if present (typically on final chunk)
+    if (usage) {
+      result.usage = {
+        prompt_tokens: usage.promptTokenCount ?? usage.promptTokens ?? 0,
+        completion_tokens: usage.candidatesTokenCount ?? usage.candidatesTokens ?? 0,
+        total_tokens: usage.totalTokenCount ?? usage.totalTokens ?? 0,
+      };
+    }
+
+    return result;
+  };
+}
+
+/**
+ * Creates a final chunk to close any open think tags.
+ */
+export function createFinalStreamChunk(wasThinking: boolean): OpenAIStreamChunk | null {
+  if (!wasThinking) return null;
+
+  return {
+    choices: [{
+      delta: { content: '</think>' },
+      index: 0,
+      finish_reason: 'stop',
+    }],
+  };
+}
+
+// Legacy single-chunk mapper for backwards compatibility
 export function mapStreamChunk(chunk: GeminiStreamChunk): OpenAIStreamChunk {
   const part = chunk?.candidates?.[0]?.content?.parts?.[0] ?? {};
   const delta: { role: string; content?: string } = { role: 'assistant' };

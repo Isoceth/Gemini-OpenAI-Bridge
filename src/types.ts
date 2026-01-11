@@ -105,7 +105,9 @@ export interface OpenAIStreamChunk {
   choices: Array<{
     delta: OpenAIStreamDelta;
     index: number;
+    finish_reason?: string | null;
   }>;
+  usage?: OpenAIUsage;
 }
 
 /* ================================================================== */
