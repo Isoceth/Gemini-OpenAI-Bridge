@@ -7,6 +7,7 @@ import {
 import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import type { GeminiContent, GeminiResponse, GeminiStreamChunk } from './types';
 
 // Read auth type from gemini CLI settings if not explicitly set via env var.
 // Settings file structure: { security: { auth: { selectedType: "oauth-personal" } } }
@@ -44,10 +45,32 @@ if (model) {
 /* ------------------------------------------------------------------ */
 /* 1.  Build the ContentGenerator exactly like the CLI does           */
 /* ------------------------------------------------------------------ */
+
+/**
+ * ContentGenerator interface - minimal typing for gemini-cli internals.
+ * Cast required because gemini-cli types are unstable between versions.
+ */
+interface ContentGenerator {
+  generateContent(params: {
+    model: string;
+    contents: GeminiContent[];
+    config: Record<string, unknown>;
+    systemInstruction?: string;
+  }): Promise<GeminiResponse>;
+  generateContentStream(params: {
+    model: string;
+    contents: GeminiContent[];
+    config: Record<string, unknown>;
+    systemInstruction?: string;
+  }): AsyncIterable<GeminiStreamChunk>;
+}
+
 let modelName: string;
-const generatorPromise = (async () => {
-  // Cast to any - gemini-cli types are unstable between versions
+const generatorPromise: Promise<ContentGenerator> = (async () => {
+  // Cast to function types - gemini-cli types are unstable between versions.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createConfig = createContentGeneratorConfig as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createGenerator = createContentGenerator as any;
 
   const cfg = await createConfig(model, authTypeEnum);
@@ -65,23 +88,26 @@ const generatorPromise = (async () => {
     getContentGeneratorConfig: () => cfg,
   };
 
-  return await createGenerator(cfg, gcConfig);
+  return await createGenerator(cfg, gcConfig) as ContentGenerator;
 })();
 
 /* ------------------------------------------------------------------ */
 /* 2.  Helpers consumed by server.ts                                   */
 /* ------------------------------------------------------------------ */
-type GenConfig = Record<string, unknown>;
 
-export async function sendChat(request: {
-  contents: any[];
-  generationConfig?: GenConfig;
+/**
+ * Request parameters for chat methods.
+ */
+interface ChatRequest {
+  contents: GeminiContent[];
+  generationConfig?: Record<string, unknown>;
   systemInstruction?: string;
   tools?: unknown;
-  [key: string]: unknown;
-}) {
+}
+
+export async function sendChat(request: ChatRequest): Promise<GeminiResponse> {
   const { contents, generationConfig = {}, systemInstruction } = request;
-  const generator: any = await generatorPromise;
+  const generator = await generatorPromise;
   return await generator.generateContent({
     model: modelName,
     contents,
@@ -90,15 +116,11 @@ export async function sendChat(request: {
   });
 }
 
-export async function* sendChatStream(request: {
-  contents: any[];
-  generationConfig?: GenConfig;
-  systemInstruction?: string;
-  tools?: unknown;
-  [key: string]: unknown;
-}) {
+export async function* sendChatStream(
+  request: ChatRequest,
+): AsyncGenerator<GeminiStreamChunk> {
   const { contents, generationConfig = {}, systemInstruction } = request;
-  const generator: any = await generatorPromise;
+  const generator = await generatorPromise;
   const stream = await generator.generateContentStream({
     model: modelName,
     contents,

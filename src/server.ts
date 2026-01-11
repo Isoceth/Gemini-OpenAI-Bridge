@@ -1,6 +1,7 @@
 import http from 'http';
 import { sendChat, sendChatStream, listModels } from './chatwrapper';
 import { mapRequest, mapResponse, mapStreamChunk } from './mapper';
+import type { OpenAIChatRequest } from './types';
 
 /* ── basic config ─────────────────────────────────────────────────── */
 const PORT = Number(process.env.PORT ?? 11434);
@@ -16,7 +17,7 @@ function allowCors(res: http.ServerResponse) {
 function readJSON(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-): Promise<any | null> {
+): Promise<OpenAIChatRequest | null> {
   return new Promise((resolve) => {
     let data = '';
     req.on('data', (c) => (data += c));
@@ -99,10 +100,11 @@ http
 
           console.log('✅ Replied HTTP ' + code + ' response', mapped);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('HTTP 500 Proxy error ➜', err);
         res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: err.message } }));
+        res.end(JSON.stringify({ error: { message } }));
       }
 
       return;
