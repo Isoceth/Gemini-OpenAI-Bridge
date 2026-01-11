@@ -4,6 +4,7 @@ import {
   createContentGeneratorConfig,
   createContentGenerator,
 } from '@google/gemini-cli-core/dist/src/core/contentGenerator.js';
+import { VALID_GEMINI_MODELS } from '@google/gemini-cli-core/dist/src/config/models.js';
 import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -134,23 +135,34 @@ export async function* sendChatStream(
 /* 3.  Model listing and info                                          */
 /* ------------------------------------------------------------------ */
 
-// Known Gemini models available via the CLI
-const KNOWN_MODELS = [
-  { id: 'gemini-2.5-pro', description: 'Most capable model, best for complex tasks' },
-  { id: 'gemini-2.5-flash', description: 'Fast and efficient, good balance of speed and capability' },
-  { id: 'gemini-2.0-flash', description: 'Previous generation flash model' },
-  { id: 'gemini-1.5-pro', description: 'Previous generation pro model' },
-  { id: 'gemini-1.5-flash', description: 'Previous generation flash model' },
-];
+// Model descriptions for known models
+const MODEL_DESCRIPTIONS: Record<string, string> = {
+  'gemini-3-pro-preview': 'Preview: Next generation pro model',
+  'gemini-3-flash-preview': 'Preview: Next generation flash model',
+  'gemini-2.5-pro': 'Most capable model, best for complex tasks',
+  'gemini-2.5-flash': 'Fast and efficient, good balance of speed and capability',
+  'gemini-2.5-flash-lite': 'Lightweight flash model for simple tasks',
+};
 
 export function listModels() {
-  return KNOWN_MODELS.map(m => ({
-    id: m.id,
+  // Get models from gemini-cli-core's valid models set
+  const models = Array.from(VALID_GEMINI_MODELS);
+
+  // Sort: stable models first, then preview models
+  models.sort((a, b) => {
+    const aPreview = a.includes('preview');
+    const bPreview = b.includes('preview');
+    if (aPreview !== bPreview) return aPreview ? 1 : -1;
+    return b.localeCompare(a); // Newer versions first within each group
+  });
+
+  return models.map(id => ({
+    id,
     object: 'model',
     created: 0,
     owned_by: 'google',
-    description: m.description,
-    active: m.id === modelName,
+    description: MODEL_DESCRIPTIONS[id] ?? id,
+    active: id === modelName,
   }));
 }
 

@@ -83,11 +83,7 @@ http
     /* -------- /v1/models ---------- */
     if (req.url === '/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          data: listModels(),
-        }),
-      );
+      res.end(JSON.stringify({ data: listModels() }));
       return;
     }
 
