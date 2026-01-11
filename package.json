@@ -1,17 +1,17 @@
 {
-  "name": "gcli_oai_proxy",
+  "name": "gemini-openai-bridge",
   "version": "1.0.0",
+  "description": "OpenAI-compatible API bridge for Google Gemini CLI",
   "main": "index.js",
   "scripts": {
     "start": "ts-node src/server.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": ["gemini", "openai", "api", "bridge"],
   "author": "",
-  "license": "ISC",
-  "description": "",
+  "license": "MIT",
   "dependencies": {
-    "@google/gemini-cli": "^0.1.5"
+    "@google/gemini-cli": "^0.23.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",

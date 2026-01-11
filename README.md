@@ -1,57 +1,67 @@
-# Gemini ↔︎ OpenAI Proxy
+# Gemini OpenAI Bridge
 
-This program is a [Gemini CLI](https://github.com/google-gemini/gemini-cli) wrapper that can serve **Google Gemini 2.5 Pro** (or Flash) through an **OpenAI-compatible API**.
-Plug-and-play with clients that already speak OpenAI like SillyTavern, llama.cpp, LangChain, the VS Code *Cline* extension, etc.
+An OpenAI-compatible API bridge for the [Gemini CLI](https://github.com/google-gemini/gemini-cli), serving **Google Gemini 2.5 Pro** (or Flash) through a local API endpoint.
+
+Works with any client that speaks OpenAI: SillyTavern, llama.cpp, LangChain, VS Code Cline, etc.
 
 ---
 
 ## Features
 
-| ✔ | Feature | Notes |
-|---|---------|-------|
-| `/v1/chat/completions` | Non-stream & stream (SSE) | Works with curl, ST, LangChain… |
-| Vision support | `image_url` → Gemini `inlineData` | |
-| Function / Tool calling | OpenAI “functions” → Gemini Tool Registry | |
-| Reasoning / chain-of-thought | Sends `enable_thoughts:true`, streams `<think>` chunks | ST shows grey bubbles |
-| 1 M-token context | Proxy auto-lifts Gemini CLI’s default 200 k cap | |
-| CORS | Enabled (`*`) by default | Ready for browser apps |
+| Feature | Notes |
+|---------|-------|
+| `/v1/chat/completions` | Non-streaming and streaming (SSE) |
+| `/v1/models` | List available models |
+| Vision support | `image_url` → Gemini `inlineData` |
+| Function/tool calling | OpenAI `functions` → Gemini Tool Registry |
+| Reasoning/chain-of-thought | `enable_thoughts:true`, streams `<think>` chunks |
+| 1M token context | Auto-lifts Gemini CLI's default 200k cap |
+| CORS | Enabled (`*`) by default |
 
 ---
 
-## Quick start
+## Quick Start
 
 ### With npm
 
 ```bash
-git clone https://github.com/Brioch/gemini-openai-proxy
-cd gemini-openai-proxy
-npm i
-npm start # launch (runs on port 11434 by default)
+git clone https://github.com/Isoceth/Gemini-OpenAI-Bridge
+cd Gemini-OpenAI-Bridge
+npm install
+npm start  # Runs on port 11434 by default
 ```
 
 ### With Docker
 
-Alternatively, you can use the provided Dockerfile to build a Docker image.
-
-```sh
-docker build --tag "gemini-openai-proxy" .
-docker run -p 11434:80 -e GEMINI_API_KEY gemini-openai-proxy
+```bash
+docker build --tag gemini-openai-bridge .
+docker run -p 11434:80 -e GEMINI_API_KEY gemini-openai-bridge
 ```
 
-### Optional env vars
+---
 
-```sh
-PORT=11434
+## Configuration
 
-# can be any of 'oauth-personal', 'gemini-api-key', 'vertex-ai'. Use oauth-personal for free access to Gemini 2.5 Pro by logging in to a Google account.
-AUTH_TYPE='gemini-api-key' 
+### Environment Variables
 
-# API key is only used with AUTH_TYPE='gemini-api-key'
-GEMINI_API_KEY=
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `11434` | Server port |
+| `AUTH_TYPE` | Auto-detected | `oauth-personal`, `gemini-api-key`, or `vertex-ai` |
+| `GEMINI_API_KEY` | — | Required when `AUTH_TYPE=gemini-api-key` |
+| `MODEL` | CLI default | `gemini-2.5-flash` or `gemini-2.5-pro` |
 
-# Use 'gemini-2.5-flash' or 'gemini-2.5-pro'. Leave empty to let CLI choose its default model.
-MODEL=
-```
+### Authentication
+
+The bridge reads authentication settings from `~/.gemini/settings.json` by default (same as the Gemini CLI). You can override this by setting `AUTH_TYPE` explicitly.
+
+- **oauth-personal**: Free access via Google account login
+- **gemini-api-key**: Use a Gemini API key
+- **vertex-ai**: Google Cloud Vertex AI
+
+---
+
+## Usage
 
 ### Minimal curl test
 
@@ -59,18 +69,18 @@ MODEL=
 curl -X POST http://localhost:11434/v1/chat/completions \
      -H "Content-Type: application/json" \
      -d '{
-       "model": "gemini-2.5-pro-latest",
-       "messages":[{"role":"user","content":"Hello Gemini!"}]
+       "model": "gemini-2.5-pro",
+       "messages": [{"role": "user", "content": "Hello Gemini!"}]
      }'
 ```
 
-### SillyTavern settings
+### SillyTavern
 
-Chat completion
-API Base URL http://127.0.0.1:11434/v1
+- API type: Chat Completion
+- API Base URL: `http://127.0.0.1:11434/v1`
 
-
+---
 
 ## License
 
-MIT – free for personal & commercial use. Forked from https://huggingface.co/engineofperplexity/gemini-openai-proxy
+MIT — Based on [gemini-openai-proxy](https://github.com/Brioch/gemini-openai-proxy) by Brioch.

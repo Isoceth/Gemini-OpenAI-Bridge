@@ -4,11 +4,36 @@ import {
   createContentGeneratorConfig,
   createContentGenerator,
 } from '@google/gemini-cli-core/dist/src/core/contentGenerator.js';
+import { readFileSync, existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
-const authType = process.env.AUTH_TYPE ?? 'gemini-api-key';
-const authTypeEnum = authType as AuthType;
+// Read auth type from gemini CLI settings if not explicitly set via env var.
+// Settings file structure: { security: { auth: { selectedType: "oauth-personal" } } }
+function getAuthType(): AuthType {
+  if (process.env.AUTH_TYPE) {
+    return process.env.AUTH_TYPE as AuthType;
+  }
 
-console.log(`Auth type: ${authType}`);
+  const settingsPath = join(homedir(), '.gemini', 'settings.json');
+  if (existsSync(settingsPath)) {
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      const selectedType = settings?.security?.auth?.selectedType;
+      if (selectedType) {
+        return selectedType as AuthType;
+      }
+    } catch {
+      // Fall through to default if settings file is malformed
+    }
+  }
+
+  return 'gemini-api-key' as AuthType;
+}
+
+const authTypeEnum = getAuthType();
+
+console.log(`Auth type: ${authTypeEnum}`);
 
 const model = process.env.MODEL ?? undefined;
 
