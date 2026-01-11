@@ -7,11 +7,30 @@ import type { OpenAIChatRequest, OpenAIErrorResponse } from './types';
 /* ── basic config ─────────────────────────────────────────────────── */
 const PORT = Number(process.env.PORT ?? 11434);
 
+/**
+ * CORS configuration via environment variables:
+ * - CORS_ORIGIN: Allowed origin(s). Defaults to '*'. Use comma-separated list for multiple.
+ * - CORS_HEADERS: Allowed headers. Defaults to '*'.
+ * - CORS_METHODS: Allowed methods. Defaults to 'GET,POST,OPTIONS'.
+ */
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? '*';
+const CORS_HEADERS = process.env.CORS_HEADERS ?? '*';
+const CORS_METHODS = process.env.CORS_METHODS ?? 'GET,POST,OPTIONS';
+
 /* ── CORS helper ──────────────────────────────────────────────────── */
-function allowCors(res: http.ServerResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+function allowCors(res: http.ServerResponse, reqOrigin?: string) {
+  // If CORS_ORIGIN contains commas, check if the request origin is in the list
+  if (CORS_ORIGIN.includes(',') && reqOrigin) {
+    const allowedOrigins = CORS_ORIGIN.split(',').map((o) => o.trim());
+    if (allowedOrigins.includes(reqOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+    }
+    // If origin not in list, don't set the header (browser will block)
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
+  }
+  res.setHeader('Access-Control-Allow-Headers', CORS_HEADERS);
+  res.setHeader('Access-Control-Allow-Methods', CORS_METHODS);
 }
 
 /* ── JSON body helper ─────────────────────────────────────────────── */
@@ -42,7 +61,9 @@ function sendError(
 /* ── server ───────────────────────────────────────────────────────── */
 http
   .createServer(async (req, res) => {
-    allowCors(res);
+    // Extract origin header for CORS validation
+    const reqOrigin = req.headers.origin as string | undefined;
+    allowCors(res, reqOrigin);
 
     console.log('➜', req.method, req.url);
 

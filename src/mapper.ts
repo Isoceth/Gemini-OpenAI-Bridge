@@ -23,8 +23,8 @@ import type {
 
 /**
  * Stub for local function calls in tool use.
- * TODO(debt): Implement proper function calling or remove if not needed.
- * See bean Gemini-OpenAI-Bridge-z9so.
+ * TODO(debt): Implement proper function calling with mapped Gemini built-in tools.
+ * See bean Gemini-OpenAI-Bridge-z9so for planned work on web search integration.
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function callLocalFunction(name: string, args: unknown) {
@@ -84,17 +84,20 @@ export async function mapRequest(body: OpenAIChatRequest): Promise<MappedRequest
     topP: body.top_p,
     ...(body.generationConfig ?? {}), // copy anything ST already merged
   };
-  if (body.include_reasoning === true) {
-    generationConfig.enable_thoughts = true;        // ← current flag
-    generationConfig.thinking_budget ??= 2048;      // optional limit
-  }
 
-  /* ---- auto-enable reasoning & 1 M context ----------------------- */
-  if (body.include_reasoning === true && generationConfig.thinking !== true) {
+  /* ---- reasoning configuration ----------------------------------- */
+  // Gemini supports two flags for reasoning/thinking:
+  // - `thinking`: Primary flag for enabling thinking mode (Gemini 2.x)
+  // - `enable_thoughts`: Alternative flag (may be used in older versions)
+  // We set both for maximum compatibility, with a shared budget.
+  if (body.include_reasoning === true) {
     generationConfig.thinking = true;
+    generationConfig.enable_thoughts = true;
     generationConfig.thinking_budget ??= 2048;
   }
-  generationConfig.maxInputTokens ??= 1_000_000; // lift context cap
+
+  /* ---- context limit --------------------------------------------- */
+  generationConfig.maxInputTokens ??= 1_000_000; // lift to 1M token context
 
   const geminiReq = {
     contents,
