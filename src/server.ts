@@ -44,6 +44,13 @@ http
       return;
     }
 
+    /* -------- /health ---------- */
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+
     /* -------- /v1/models ---------- */
     if (req.url === '/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
