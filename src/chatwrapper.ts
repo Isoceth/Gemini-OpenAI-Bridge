@@ -98,21 +98,26 @@ const generatorPromise: Promise<ContentGenerator> = (async () => {
 
 /**
  * Request parameters for chat methods.
+ * Matches GeminiRequest from types.ts.
  */
 interface ChatRequest {
   contents: GeminiContent[];
   generationConfig?: Record<string, unknown>;
   systemInstruction?: string;
-  tools?: unknown;
+  tools?: unknown[];
 }
 
 export async function sendChat(request: ChatRequest): Promise<GeminiResponse> {
-  const { contents, generationConfig = {}, systemInstruction } = request;
+  const { contents, generationConfig = {}, systemInstruction, tools } = request;
   const generator = await generatorPromise;
+
+  // Merge tools into config if provided (for Google Search grounding)
+  const config = tools?.length ? { ...generationConfig, tools } : generationConfig;
+
   return await generator.generateContent({
     model: modelName,
     contents,
-    config: generationConfig,
+    config,
     systemInstruction,
   });
 }
@@ -120,12 +125,16 @@ export async function sendChat(request: ChatRequest): Promise<GeminiResponse> {
 export async function* sendChatStream(
   request: ChatRequest,
 ): AsyncGenerator<GeminiStreamChunk> {
-  const { contents, generationConfig = {}, systemInstruction } = request;
+  const { contents, generationConfig = {}, systemInstruction, tools } = request;
   const generator = await generatorPromise;
+
+  // Merge tools into config if provided (for Google Search grounding)
+  const config = tools?.length ? { ...generationConfig, tools } : generationConfig;
+
   const stream = await generator.generateContentStream({
     model: modelName,
     contents,
-    config: generationConfig,
+    config,
     systemInstruction,
   });
   for await (const chunk of stream) yield chunk;

@@ -153,6 +153,7 @@ export interface GeminiRequest {
   generationConfig: GeminiGenerationConfig;
   stream?: boolean;
   systemInstruction?: string;
+  tools?: unknown[];
 }
 
 /**

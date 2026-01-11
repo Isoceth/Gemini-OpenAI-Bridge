@@ -115,7 +115,9 @@ http
       const body = rawBody as OpenAIChatRequest;
 
       try {
-        const { geminiReq, tools } = await mapRequest(body);
+        // geminiReq contains the properly formatted request including tools for grounding
+        // The ToolRegistry is returned for potential future custom function handling
+        const { geminiReq } = await mapRequest(body);
 
         if (body.stream) {
           res.writeHead(200, {
@@ -129,7 +131,7 @@ http
           // Use stateful mapper to track think tag state across chunks
           const mapChunk = createStreamMapper();
 
-          for await (const chunk of sendChatStream({ ...geminiReq, tools })) {
+          for await (const chunk of sendChatStream(geminiReq)) {
             const mapped = mapChunk(chunk);
             res.write(`data: ${JSON.stringify(mapped)}\n\n`);
           }
@@ -137,7 +139,7 @@ http
 
           console.log('➜ done sending streamed response');
         } else {
-          const gResp = await sendChat({ ...geminiReq, tools });
+          const gResp = await sendChat(geminiReq);
           const mapped = mapResponse(gResp);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(mapped));

@@ -14,6 +14,7 @@ import type {
   OpenAIStreamChunk,
   GeminiPart,
   GeminiContent,
+  GeminiRequest,
   GeminiResponse,
   GeminiStreamChunk,
   MappedRequest,
@@ -22,13 +23,32 @@ import type {
 /* ------------------------------------------------------------------ */
 
 /**
- * Stub for local function calls in tool use.
- * TODO(debt): Implement proper function calling with mapped Gemini built-in tools.
- * See bean Gemini-OpenAI-Bridge-z9so for planned work on web search integration.
+ * Tool names that map to Gemini's built-in Google Search grounding.
+ * When these are requested, we enable grounding on the generation config
+ * instead of registering them as function call tools.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function callLocalFunction(name: string, args: unknown) {
-  return { ok: true };
+const GOOGLE_SEARCH_TOOL_NAMES = new Set([
+  'web_search',
+  'google_search',
+  'google_web_search',
+  'search',
+  'internet_search',
+]);
+
+/**
+ * Checks if any of the requested functions are Google Search tools.
+ * Returns the names of built-in tools found (to filter from custom registration).
+ */
+function findBuiltInTools(functions: OpenAIFunction[] | undefined): Set<string> {
+  const builtIn = new Set<string>();
+  if (!functions) return builtIn;
+
+  for (const fn of functions) {
+    if (GOOGLE_SEARCH_TOOL_NAMES.has(fn.name.toLowerCase())) {
+      builtIn.add(fn.name);
+    }
+  }
+  return builtIn;
 }
 
 /* ================================================================== */
@@ -99,40 +119,56 @@ export async function mapRequest(body: OpenAIChatRequest): Promise<MappedRequest
   /* ---- context limit --------------------------------------------- */
   generationConfig.maxInputTokens ??= 1_000_000; // lift to 1M token context
 
-  const geminiReq = {
+  /* ---- Tool / function mapping ----------------------------------- */
+  // Check for built-in tools that should be mapped to Gemini grounding
+  const builtInTools = findBuiltInTools(body.functions);
+  const hasGoogleSearch = builtInTools.size > 0;
+
+  // Build the Gemini tools array
+  // If Google Search is requested, add the googleSearch grounding tool
+  const geminiTools: unknown[] = [];
+  if (hasGoogleSearch) {
+    geminiTools.push({ googleSearch: {} });
+    console.log('Enabled Google Search grounding for tools:', Array.from(builtInTools));
+  }
+
+  const geminiReq: GeminiRequest = {
     contents,
     generationConfig,
     stream: body.stream,
     systemInstruction,
+    tools: geminiTools.length > 0 ? geminiTools : undefined,
   };
 
   console.log('Gemini request:', geminiReq);
 
-  /* ---- Tool / function mapping ----------------------------------- */
-  // ToolRegistry constructor expects a context object; empty object is acceptable.
+  // ToolRegistry for any custom (non-built-in) function definitions
   // Cast required: gemini-cli types are unstable between versions.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools = new ToolRegistry({} as any);
 
   if (body.functions?.length) {
-    // registerTool method isn't exposed in public types; cast required.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reg = tools as any;
-    body.functions.forEach((fn: OpenAIFunction) => {
-      // OpenAI function parameters aren't Zod schemas, so we pass them through.
-      // The tool registry accepts any object with inputSchema.
+    // Filter out built-in tools - they're handled via Gemini grounding
+    const customFunctions = body.functions.filter(fn => !builtInTools.has(fn.name));
+
+    if (customFunctions.length > 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const schema = z.object((fn.parameters?.properties ?? {}) as any);
-      reg.registerTool(
-        fn.name,
-        {
-          title: fn.name,
-          description: fn.description ?? '',
-          inputSchema: schema,
-        },
-        async (args: unknown) => callLocalFunction(fn.name, args),
-      );
-    });
+      const reg = tools as any;
+      customFunctions.forEach((fn: OpenAIFunction) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const schema = z.object((fn.parameters?.properties ?? {}) as any);
+        reg.registerTool(
+          fn.name,
+          {
+            title: fn.name,
+            description: fn.description ?? '',
+            inputSchema: schema,
+          },
+          // Stub handler - custom function execution not supported
+          async () => ({ error: 'Custom function execution not supported by proxy' }),
+        );
+      });
+    }
   }
 
   return { geminiReq, tools };
