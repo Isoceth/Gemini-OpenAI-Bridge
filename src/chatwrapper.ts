@@ -46,15 +46,26 @@ if (model) {
 /* ------------------------------------------------------------------ */
 let modelName: string;
 const generatorPromise = (async () => {
-  // Pass undefined for model so the helper falls back to DEFAULT_GEMINI_MODEL
-  const cfg = await createContentGeneratorConfig(
-    model, // let default model be used
-    authTypeEnum
-  );
-  modelName = cfg.model;           // remember the actual model string
+  // Cast to any - gemini-cli types are unstable between versions
+  const createConfig = createContentGeneratorConfig as any;
+  const createGenerator = createContentGenerator as any;
+
+  const cfg = await createConfig(model, authTypeEnum);
+  modelName = cfg.model ?? model ?? 'gemini-2.5-pro';
   console.log(`Gemini CLI returned model: ${modelName}`);
 
-  return await createContentGenerator(cfg);
+  // gcConfig stub - provides minimal interface expected by createContentGenerator v0.23+
+  const gcConfig = {
+    fakeResponses: undefined,
+    recordResponses: undefined,
+    getModel: () => modelName,
+    getPreviewFeatures: () => [],
+    getUsageStatisticsEnabled: () => false,
+    getProxy: () => undefined,
+    getContentGeneratorConfig: () => cfg,
+  };
+
+  return await createGenerator(cfg, gcConfig);
 })();
 
 /* ------------------------------------------------------------------ */
@@ -62,48 +73,63 @@ const generatorPromise = (async () => {
 /* ------------------------------------------------------------------ */
 type GenConfig = Record<string, unknown>;
 
-export async function sendChat({
-  contents,
-  generationConfig = {},
-}: {
+export async function sendChat(request: {
   contents: any[];
   generationConfig?: GenConfig;
-  tools?: unknown;                // accepted but ignored for now
+  systemInstruction?: string;
+  tools?: unknown;
+  [key: string]: unknown;
 }) {
+  const { contents, generationConfig = {}, systemInstruction } = request;
   const generator: any = await generatorPromise;
   return await generator.generateContent({
     model: modelName,
     contents,
     config: generationConfig,
+    systemInstruction,
   });
 }
 
-export async function* sendChatStream({
-  contents,
-  generationConfig = {},
-}: {
+export async function* sendChatStream(request: {
   contents: any[];
   generationConfig?: GenConfig;
+  systemInstruction?: string;
   tools?: unknown;
+  [key: string]: unknown;
 }) {
+  const { contents, generationConfig = {}, systemInstruction } = request;
   const generator: any = await generatorPromise;
   const stream = await generator.generateContentStream({
     model: modelName,
     contents,
     config: generationConfig,
+    systemInstruction,
   });
   for await (const chunk of stream) yield chunk;
 }
 
 /* ------------------------------------------------------------------ */
-/* 3.  Minimal stubs so server.ts compiles (extend later)              */
+/* 3.  Model listing and info                                          */
 /* ------------------------------------------------------------------ */
+
+// Known Gemini models available via the CLI
+const KNOWN_MODELS = [
+  { id: 'gemini-2.5-pro', description: 'Most capable model, best for complex tasks' },
+  { id: 'gemini-2.5-flash', description: 'Fast and efficient, good balance of speed and capability' },
+  { id: 'gemini-2.0-flash', description: 'Previous generation flash model' },
+  { id: 'gemini-1.5-pro', description: 'Previous generation pro model' },
+  { id: 'gemini-1.5-flash', description: 'Previous generation flash model' },
+];
+
 export function listModels() {
-  return [{ 
-    id: modelName,
+  return KNOWN_MODELS.map(m => ({
+    id: m.id,
     object: 'model',
-    owned_by: 'google'
-  }];
+    created: 0,
+    owned_by: 'google',
+    description: m.description,
+    active: m.id === modelName,
+  }));
 }
 
 export function getModel() {
