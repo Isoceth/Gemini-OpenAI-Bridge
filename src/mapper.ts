@@ -55,6 +55,31 @@ function findBuiltInTools(functions: OpenAIFunction[] | undefined): Set<string> 
 /* Request mapper: OpenAI ➞ Gemini                                     */
 /* ================================================================== */
 
+/**
+ * Parses a data URL (data:[<mediatype>][;base64],<data>) into its components.
+ * Returns null if the URL is not a valid data URL.
+ */
+function parseDataUrl(url: string): { mimeType: string; data: string } | null {
+  const dataUrlRegex = /^data:([^;,]+)?(?:;base64)?,(.*)$/i;
+  const match = url.match(dataUrlRegex);
+  if (!match) return null;
+
+  const mimeType = match[1] || 'application/octet-stream';
+  const data = match[2];
+
+  // Check if it's base64 encoded (presence of ;base64 in original URL)
+  const isBase64 = url.toLowerCase().includes(';base64,');
+
+  if (isBase64) {
+    return { mimeType, data };
+  } else {
+    // URL-encoded data needs to be decoded then re-encoded as base64
+    const decoded = decodeURIComponent(data);
+    const base64 = Buffer.from(decoded).toString('base64');
+    return { mimeType, data: base64 };
+  }
+}
+
 // Convert a single message's content to Gemini parts
 async function contentToParts(
   content: string | OpenAIContentItem[],
@@ -63,7 +88,16 @@ async function contentToParts(
   if (Array.isArray(content)) {
     for (const item of content) {
       if (item.type === 'image_url' && item.image_url) {
-        parts.push({ inlineData: await fetchAndEncode(item.image_url.url) });
+        const url = item.image_url.url;
+
+        // Handle data URLs directly without fetching
+        const dataUrlParts = parseDataUrl(url);
+        if (dataUrlParts) {
+          parts.push({ inlineData: dataUrlParts });
+        } else {
+          // Regular HTTP(S) URL - fetch and encode
+          parts.push({ inlineData: await fetchAndEncode(url) });
+        }
       } else if (item.type === 'text' && item.text) {
         parts.push({ text: item.text });
       }
@@ -222,13 +256,23 @@ export function mapResponse(
 /* ================================================================== */
 
 /**
+ * Stateful stream mapper that tracks thinking state across chunks.
+ */
+interface StreamMapper {
+  /** Maps a Gemini chunk to OpenAI format, tracking think tag state. */
+  mapChunk: (chunk: GeminiStreamChunk) => OpenAIStreamChunk;
+  /** Returns true if we're currently inside a think block. */
+  isThinking: () => boolean;
+}
+
+/**
  * Creates a stateful stream chunk mapper that tracks thinking state
  * to properly open/close think tags across chunks.
  */
-export function createStreamMapper() {
+export function createStreamMapper(): StreamMapper {
   let wasThinking = false;
 
-  return function mapChunk(chunk: GeminiStreamChunk): OpenAIStreamChunk {
+  function mapChunk(chunk: GeminiStreamChunk): OpenAIStreamChunk {
     const candidate = chunk?.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
     const usage = chunk?.usageMetadata;
@@ -278,6 +322,11 @@ export function createStreamMapper() {
     }
 
     return result;
+  }
+
+  return {
+    mapChunk,
+    isThinking: () => wasThinking,
   };
 }
 

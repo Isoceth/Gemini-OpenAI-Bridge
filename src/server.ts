@@ -1,6 +1,6 @@
 import http from 'http';
 import { sendChat, sendChatStream, listModels } from './chatwrapper';
-import { mapRequest, mapResponse, createStreamMapper } from './mapper';
+import { mapRequest, mapResponse, createStreamMapper, createFinalStreamChunk } from './mapper';
 import { validateChatRequest, createError } from './validation';
 import type { OpenAIChatRequest, OpenAIErrorResponse } from './types';
 
@@ -129,12 +129,19 @@ http
           console.log('➜ sending HTTP 200 streamed response');
 
           // Use stateful mapper to track think tag state across chunks
-          const mapChunk = createStreamMapper();
+          const mapper = createStreamMapper();
 
           for await (const chunk of sendChatStream(geminiReq)) {
-            const mapped = mapChunk(chunk);
+            const mapped = mapper.mapChunk(chunk);
             res.write(`data: ${JSON.stringify(mapped)}\n\n`);
           }
+
+          // Emit closing think tag if stream ended while still in thinking mode
+          const finalChunk = createFinalStreamChunk(mapper.isThinking());
+          if (finalChunk) {
+            res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+          }
+
           res.end('data: [DONE]\n\n');
 
           console.log('➜ done sending streamed response');
