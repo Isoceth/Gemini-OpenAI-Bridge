@@ -133,6 +133,7 @@ export async function mapRequest(body: OpenAIChatRequest): Promise<MappedRequest
   }
 
   const geminiReq: GeminiRequest = {
+    model: body.model,
     contents,
     generationConfig,
     stream: body.stream,
@@ -199,7 +200,7 @@ export function mapResponse(
     id: `chatcmpl-${Date.now()}`,
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
-    model: getModel(),
+    model: gResp.modelVersion ?? getModel(),
     choices: [
       {
         index: 0,

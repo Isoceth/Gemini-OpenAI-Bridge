@@ -149,6 +149,7 @@ export interface GeminiGenerationConfig {
  * Gemini API request structure.
  */
 export interface GeminiRequest {
+  model?: string;
   contents: GeminiContent[];
   generationConfig: GeminiGenerationConfig;
   stream?: boolean;
@@ -187,6 +188,7 @@ export interface GeminiResponse {
   promptFeedback?: {
     blockReason?: string;
   };
+  modelVersion?: string;
 }
 
 /**

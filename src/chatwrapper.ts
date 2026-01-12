@@ -101,6 +101,7 @@ const generatorPromise: Promise<ContentGenerator> = (async () => {
  * Matches GeminiRequest from types.ts.
  */
 interface ChatRequest {
+  model?: string;
   contents: GeminiContent[];
   generationConfig?: Record<string, unknown>;
   systemInstruction?: string;
@@ -108,14 +109,17 @@ interface ChatRequest {
 }
 
 export async function sendChat(request: ChatRequest): Promise<GeminiResponse> {
-  const { contents, generationConfig = {}, systemInstruction, tools } = request;
+  const { model, contents, generationConfig = {}, systemInstruction, tools } = request;
   const generator = await generatorPromise;
+
+  // Use request model if provided, otherwise fall back to startup model
+  const effectiveModel = model ?? modelName;
 
   // Merge tools into config if provided (for Google Search grounding)
   const config = tools?.length ? { ...generationConfig, tools } : generationConfig;
 
   return await generator.generateContent({
-    model: modelName,
+    model: effectiveModel,
     contents,
     config,
     systemInstruction,
@@ -125,14 +129,17 @@ export async function sendChat(request: ChatRequest): Promise<GeminiResponse> {
 export async function* sendChatStream(
   request: ChatRequest,
 ): AsyncGenerator<GeminiStreamChunk> {
-  const { contents, generationConfig = {}, systemInstruction, tools } = request;
+  const { model, contents, generationConfig = {}, systemInstruction, tools } = request;
   const generator = await generatorPromise;
+
+  // Use request model if provided, otherwise fall back to startup model
+  const effectiveModel = model ?? modelName;
 
   // Merge tools into config if provided (for Google Search grounding)
   const config = tools?.length ? { ...generationConfig, tools } : generationConfig;
 
   const stream = await generator.generateContentStream({
-    model: modelName,
+    model: effectiveModel,
     contents,
     config,
     systemInstruction,
