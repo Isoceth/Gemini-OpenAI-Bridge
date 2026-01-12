@@ -4,9 +4,11 @@ import {
   createContentGeneratorConfig,
   createContentGenerator,
 } from '@google/gemini-cli-core/dist/src/core/contentGenerator.js';
+import { VALID_GEMINI_MODELS } from '@google/gemini-cli-core/dist/src/config/models.js';
 import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import type { GeminiContent, GeminiResponse, GeminiStreamChunk } from './types';
 
 // Read auth type from gemini CLI settings if not explicitly set via env var.
 // Settings file structure: { security: { auth: { selectedType: "oauth-personal" } } }
@@ -44,10 +46,32 @@ if (model) {
 /* ------------------------------------------------------------------ */
 /* 1.  Build the ContentGenerator exactly like the CLI does           */
 /* ------------------------------------------------------------------ */
+
+/**
+ * ContentGenerator interface - minimal typing for gemini-cli internals.
+ * Cast required because gemini-cli types are unstable between versions.
+ */
+interface ContentGenerator {
+  generateContent(params: {
+    model: string;
+    contents: GeminiContent[];
+    config: Record<string, unknown>;
+    systemInstruction?: string;
+  }): Promise<GeminiResponse>;
+  generateContentStream(params: {
+    model: string;
+    contents: GeminiContent[];
+    config: Record<string, unknown>;
+    systemInstruction?: string;
+  }): AsyncIterable<GeminiStreamChunk>;
+}
+
 let modelName: string;
-const generatorPromise = (async () => {
-  // Cast to any - gemini-cli types are unstable between versions
+const generatorPromise: Promise<ContentGenerator> = (async () => {
+  // Cast to function types - gemini-cli types are unstable between versions.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createConfig = createContentGeneratorConfig as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createGenerator = createContentGenerator as any;
 
   const cfg = await createConfig(model, authTypeEnum);
@@ -65,44 +89,59 @@ const generatorPromise = (async () => {
     getContentGeneratorConfig: () => cfg,
   };
 
-  return await createGenerator(cfg, gcConfig);
+  return await createGenerator(cfg, gcConfig) as ContentGenerator;
 })();
 
 /* ------------------------------------------------------------------ */
 /* 2.  Helpers consumed by server.ts                                   */
 /* ------------------------------------------------------------------ */
-type GenConfig = Record<string, unknown>;
 
-export async function sendChat(request: {
-  contents: any[];
-  generationConfig?: GenConfig;
+/**
+ * Request parameters for chat methods.
+ * Matches GeminiRequest from types.ts.
+ */
+interface ChatRequest {
+  model?: string;
+  contents: GeminiContent[];
+  generationConfig?: Record<string, unknown>;
   systemInstruction?: string;
-  tools?: unknown;
-  [key: string]: unknown;
-}) {
-  const { contents, generationConfig = {}, systemInstruction } = request;
-  const generator: any = await generatorPromise;
+  tools?: unknown[];
+}
+
+export async function sendChat(request: ChatRequest): Promise<GeminiResponse> {
+  const { model, contents, generationConfig = {}, systemInstruction, tools } = request;
+  const generator = await generatorPromise;
+
+  // Use request model if provided, otherwise fall back to startup model
+  const effectiveModel = model ?? modelName;
+
+  // Merge tools into config if provided (for Google Search grounding)
+  const config = tools?.length ? { ...generationConfig, tools } : generationConfig;
+
   return await generator.generateContent({
-    model: modelName,
+    model: effectiveModel,
     contents,
-    config: generationConfig,
+    config,
     systemInstruction,
   });
 }
 
-export async function* sendChatStream(request: {
-  contents: any[];
-  generationConfig?: GenConfig;
-  systemInstruction?: string;
-  tools?: unknown;
-  [key: string]: unknown;
-}) {
-  const { contents, generationConfig = {}, systemInstruction } = request;
-  const generator: any = await generatorPromise;
+export async function* sendChatStream(
+  request: ChatRequest,
+): AsyncGenerator<GeminiStreamChunk> {
+  const { model, contents, generationConfig = {}, systemInstruction, tools } = request;
+  const generator = await generatorPromise;
+
+  // Use request model if provided, otherwise fall back to startup model
+  const effectiveModel = model ?? modelName;
+
+  // Merge tools into config if provided (for Google Search grounding)
+  const config = tools?.length ? { ...generationConfig, tools } : generationConfig;
+
   const stream = await generator.generateContentStream({
-    model: modelName,
+    model: effectiveModel,
     contents,
-    config: generationConfig,
+    config,
     systemInstruction,
   });
   for await (const chunk of stream) yield chunk;
@@ -112,23 +151,34 @@ export async function* sendChatStream(request: {
 /* 3.  Model listing and info                                          */
 /* ------------------------------------------------------------------ */
 
-// Known Gemini models available via the CLI
-const KNOWN_MODELS = [
-  { id: 'gemini-2.5-pro', description: 'Most capable model, best for complex tasks' },
-  { id: 'gemini-2.5-flash', description: 'Fast and efficient, good balance of speed and capability' },
-  { id: 'gemini-2.0-flash', description: 'Previous generation flash model' },
-  { id: 'gemini-1.5-pro', description: 'Previous generation pro model' },
-  { id: 'gemini-1.5-flash', description: 'Previous generation flash model' },
-];
+// Model descriptions for known models
+const MODEL_DESCRIPTIONS: Record<string, string> = {
+  'gemini-3-pro-preview': 'Preview: Next generation pro model',
+  'gemini-3-flash-preview': 'Preview: Next generation flash model',
+  'gemini-2.5-pro': 'Most capable model, best for complex tasks',
+  'gemini-2.5-flash': 'Fast and efficient, good balance of speed and capability',
+  'gemini-2.5-flash-lite': 'Lightweight flash model for simple tasks',
+};
 
 export function listModels() {
-  return KNOWN_MODELS.map(m => ({
-    id: m.id,
+  // Get models from gemini-cli-core's valid models set
+  const models = Array.from(VALID_GEMINI_MODELS);
+
+  // Sort: stable models first, then preview models
+  models.sort((a, b) => {
+    const aPreview = a.includes('preview');
+    const bPreview = b.includes('preview');
+    if (aPreview !== bPreview) return aPreview ? 1 : -1;
+    return b.localeCompare(a); // Newer versions first within each group
+  });
+
+  return models.map(id => ({
+    id,
     object: 'model',
     created: 0,
     owned_by: 'google',
-    description: m.description,
-    active: m.id === modelName,
+    description: MODEL_DESCRIPTIONS[id] ?? id,
+    active: id === modelName,
   }));
 }
 

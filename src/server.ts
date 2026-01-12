@@ -1,40 +1,69 @@
 import http from 'http';
 import { sendChat, sendChatStream, listModels } from './chatwrapper';
-import { mapRequest, mapResponse, mapStreamChunk } from './mapper';
+import { mapRequest, mapResponse, createStreamMapper, createFinalStreamChunk } from './mapper';
+import { validateChatRequest, createError } from './validation';
+import type { OpenAIChatRequest, OpenAIErrorResponse } from './types';
 
 /* ── basic config ─────────────────────────────────────────────────── */
 const PORT = Number(process.env.PORT ?? 11434);
 
+/**
+ * CORS configuration via environment variables:
+ * - CORS_ORIGIN: Allowed origin(s). Defaults to '*'. Use comma-separated list for multiple.
+ * - CORS_HEADERS: Allowed headers. Defaults to '*'.
+ * - CORS_METHODS: Allowed methods. Defaults to 'GET,POST,OPTIONS'.
+ */
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? '*';
+const CORS_HEADERS = process.env.CORS_HEADERS ?? '*';
+const CORS_METHODS = process.env.CORS_METHODS ?? 'GET,POST,OPTIONS';
+
 /* ── CORS helper ──────────────────────────────────────────────────── */
-function allowCors(res: http.ServerResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+function allowCors(res: http.ServerResponse, reqOrigin?: string) {
+  // If CORS_ORIGIN contains commas, check if the request origin is in the list
+  if (CORS_ORIGIN.includes(',') && reqOrigin) {
+    const allowedOrigins = CORS_ORIGIN.split(',').map((o) => o.trim());
+    if (allowedOrigins.includes(reqOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+    }
+    // If origin not in list, don't set the header (browser will block)
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
+  }
+  res.setHeader('Access-Control-Allow-Headers', CORS_HEADERS);
+  res.setHeader('Access-Control-Allow-Methods', CORS_METHODS);
 }
 
 /* ── JSON body helper ─────────────────────────────────────────────── */
-function readJSON(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-): Promise<any | null> {
-  return new Promise((resolve) => {
+function readJSON(req: http.IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
     let data = '';
     req.on('data', (c) => (data += c));
     req.on('end', () => {
       try {
         resolve(data ? JSON.parse(data) : {});
       } catch {
-        res.writeHead(400).end(); // malformed JSON
-        resolve(null);
+        reject(new Error('Invalid JSON in request body'));
       }
     });
   });
 }
 
+/* ── Error response helper ────────────────────────────────────────── */
+function sendError(
+  res: http.ServerResponse,
+  statusCode: number,
+  error: OpenAIErrorResponse,
+) {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(error));
+}
+
 /* ── server ───────────────────────────────────────────────────────── */
 http
   .createServer(async (req, res) => {
-    allowCors(res);
+    // Extract origin header for CORS validation
+    const reqOrigin = req.headers.origin as string | undefined;
+    allowCors(res, reqOrigin);
 
     console.log('➜', req.method, req.url);
 
@@ -54,26 +83,41 @@ http
     /* -------- /v1/models ---------- */
     if (req.url === '/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          data: listModels(),
-        }),
-      );
+      res.end(JSON.stringify({ data: listModels() }));
       return;
     }
 
     /* ---- /v1/chat/completions ---- */
     if (req.url === '/v1/chat/completions' && req.method === 'POST') {
-      const body = await readJSON(req, res);
-      if (!body) {
-        res.writeHead(400).end();
-        console.log('HTTP 400 Proxy error: malformed JSON');
-
+      // Parse JSON body
+      let rawBody: unknown;
+      try {
+        rawBody = await readJSON(req);
+      } catch {
+        console.log('HTTP 400: malformed JSON');
+        sendError(res, 400, createError(
+          'Invalid JSON in request body',
+          'invalid_request_error',
+          'invalid_json',
+        ));
         return;
       }
 
+      // Validate request structure
+      const validation = validateChatRequest(rawBody);
+      if (!validation.valid) {
+        console.log('HTTP 400: validation failed');
+        sendError(res, 400, validation.error);
+        return;
+      }
+
+      // Cast to full request type after validation
+      const body = rawBody as OpenAIChatRequest;
+
       try {
-        const { geminiReq, tools } = await mapRequest(body);
+        // geminiReq contains the properly formatted request including tools for grounding
+        // The ToolRegistry is returned for potential future custom function handling
+        const { geminiReq } = await mapRequest(body);
 
         if (body.stream) {
           res.writeHead(200, {
@@ -84,32 +128,46 @@ http
 
           console.log('➜ sending HTTP 200 streamed response');
 
-          for await (const chunk of sendChatStream({ ...geminiReq, tools })) {
-            res.write(`data: ${JSON.stringify(mapStreamChunk(chunk))}\n\n`);
+          // Use stateful mapper to track think tag state across chunks
+          const mapper = createStreamMapper();
+
+          for await (const chunk of sendChatStream(geminiReq)) {
+            const mapped = mapper.mapChunk(chunk);
+            res.write(`data: ${JSON.stringify(mapped)}\n\n`);
           }
+
+          // Emit closing think tag if stream ended while still in thinking mode
+          const finalChunk = createFinalStreamChunk(mapper.isThinking());
+          if (finalChunk) {
+            res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+          }
+
           res.end('data: [DONE]\n\n');
 
           console.log('➜ done sending streamed response');
         } else {
-          const gResp = await sendChat({ ...geminiReq, tools });
+          const gResp = await sendChat(geminiReq);
           const mapped = mapResponse(gResp);
-          const code = 200;
-          res.writeHead(code, { 'Content-Type': 'application/json' });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(mapped));
 
-          console.log('✅ Replied HTTP ' + code + ' response', mapped);
+          console.log('✅ Replied HTTP 200 response', mapped);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('HTTP 500 Proxy error ➜', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: err.message } }));
+        sendError(res, 500, createError(message, 'api_error'));
       }
 
       return;
     }
 
-    console.log('➜ unknown request, returning HTTP 404');
     /* ---- anything else ---------- */
-    res.writeHead(404).end();
+    console.log('➜ unknown request, returning HTTP 404');
+    sendError(res, 404, createError(
+      `Unknown endpoint: ${req.method} ${req.url}`,
+      'invalid_request_error',
+      'unknown_url',
+    ));
   })
   .listen(PORT, () => console.log(`OpenAI proxy listening on http://localhost:${PORT}`));

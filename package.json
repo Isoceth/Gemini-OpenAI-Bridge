@@ -8,7 +8,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["gemini", "openai", "api", "bridge"],
-  "author": "",
+  "author": "Ben Forsyth-Johnson <ben.forsythjohnson@gmail.com>",
   "license": "MIT",
   "dependencies": {
     "@google/gemini-cli": "^0.23.0"

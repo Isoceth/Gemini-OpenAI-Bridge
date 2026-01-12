@@ -5,6 +5,9 @@
     "module": "commonjs",
     "moduleResolution": "node",
 
+    /* ---- type safety ---- */
+    "strict": true,
+
     /* ---- quality-of-life ---- */
     "esModuleInterop": true,
     "skipLibCheck": true,
