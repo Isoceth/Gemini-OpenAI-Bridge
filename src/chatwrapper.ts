@@ -175,7 +175,6 @@ export function listModels() {
   return models.map(id => ({
     id,
     object: 'model',
-    created: 0,
     owned_by: 'google',
     description: MODEL_DESCRIPTIONS[id] ?? id,
     active: id === modelName,
